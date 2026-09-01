@@ -1,0 +1,25 @@
+name: macd-lab
+
+services:
+  app:
+    image: macd-lab:arm64
+    container_name: macd-lab
+    restart: unless-stopped
+    environment:
+      SERVERCHAN_SENDKEY: ${SERVERCHAN_SENDKEY:?SERVERCHAN_SENDKEY must be set in .env}
+      TZ: Asia/Shanghai
+      PORT: 8080
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - /SATA存储11/macd-notifier-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

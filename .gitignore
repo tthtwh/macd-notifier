@@ -1,0 +1,10 @@
+node_modules/
+.env
+data/state.json
+logs/
+npm-debug.log*
+macd-notifier-*.tar
+macd-lab-*.tar
+dist/
+web/node_modules/
+web/.pnpm-store/

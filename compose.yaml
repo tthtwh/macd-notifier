@@ -1,0 +1,30 @@
+name: macd-lab
+
+services:
+  app:
+    build:
+      context: .
+    image: macd-lab:latest
+    container_name: macd-lab
+    restart: unless-stopped
+    environment:
+      SERVERCHAN_SENDKEY: ${SERVERCHAN_SENDKEY:?SERVERCHAN_SENDKEY must be set in .env}
+      TZ: Asia/Shanghai
+      PORT: 8080
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    volumes:
+      - macd-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  macd-data:
