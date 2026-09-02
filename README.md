@@ -23,16 +23,15 @@
 
 ```bash
 npm install
-copy .env.example .env
+copy data\.env.example data\.env
 npm run build
 npm start
 ```
 
-在 `.env` 中配置：
+在 `data/.env` 中配置：
 
 ```dotenv
 SERVERCHAN_SENDKEY=你的SendKey
-WEB_PORT=8080
 ```
 
 访问 `http://localhost:8080`。`npm start` 会同时启动回测页面和通知调度器。
@@ -56,7 +55,7 @@ npm run test-notify
 docker compose up -d --build
 ```
 
-回测页面默认映射到 NAS 的 `8080` 端口。可在 `.env` 里通过 `WEB_PORT` 修改宿主机端口。
+回测页面默认映射到 NAS 的 `8080` 端口。
 
 极空间 ARM64 镜像：
 
@@ -68,8 +67,18 @@ docker save -o macd-lab-arm64.tar macd-lab:arm64
 导入镜像后，在极空间 Compose 中使用 `compose.zspace.yaml`。它会把：
 
 - `8080` 映射为回测页面端口；
-- `/SATA存储11/macd-notifier-data` 挂载到 `/app/data`，继续保存通知去重状态；
-- `SERVERCHAN_SENDKEY` 从同目录 `.env` 读取。
+- `/SATA存储11/macd` 挂载到容器 `/app/data`；
+- `/SATA存储11/macd/.env` 保存 `SERVERCHAN_SENDKEY`；
+- `/SATA存储11/macd/state.json` 保存通知去重状态；
+- `/SATA存储11/macd/query-history.json` 保存页面最近查询记录。
+
+在极空间的 `/SATA存储11/macd/.env` 写入：
+
+```dotenv
+SERVERCHAN_SENDKEY=你的SendKey
+```
+
+容器每次启动都会读取这个文件。换镜像或重建容器时，只要继续挂载同一个文件夹，SendKey、通知状态和搜索记录都不会丢失。
 
 查看日志：
 

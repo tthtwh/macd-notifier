@@ -25,8 +25,12 @@ test('入口文件在当前平台能启动并保持调度进程', async () => {
   const timeout = setTimeout(() => child.kill(), 3_000);
 
   try {
-    const [chunk] = await once(child.stdout, 'data');
-    assert.match(chunk.toString(), /MACD 通知服务已启动/);
+    let output = '';
+    for await (const chunk of child.stdout) {
+      output += chunk.toString();
+      if (/MACD 通知服务已启动/.test(output)) break;
+    }
+    assert.match(output, /MACD 通知服务已启动/);
     assert.equal(child.exitCode, null);
   } finally {
     clearTimeout(timeout);

@@ -297,7 +297,7 @@ function renderLong() {
       </section>
 
       <section class="panel">
-        <div class="section-title"><h2>最近查询</h2><span>保存在当前浏览器</span></div>
+        <div class="section-title"><h2>最近查询</h2><span>持久化保存在挂载目录</span></div>
         <div class="table-wrap"><table class="compact-table">
           <thead><tr><th>ETF</th><th>查询区间</th><th>查询时间</th><th>操作</th></tr></thead>
           <tbody>${state.queryHistory.length ? state.queryHistory.map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${item.start || '上市日'} 至 ${item.end || '最新'}</td><td>${escapeHtml(item.queriedAt)}</td><td><button class="link-button replay-query" data-code="${item.code}" data-start="${item.start || ''}" data-end="${item.end || ''}">重新查询</button></td></tr>`).join('') : '<tr><td colspan="4" class="empty">暂无查询记录</td></tr>'}</tbody>
@@ -577,8 +577,37 @@ function rememberQuery() {
   };
   state.queryHistory = [record, ...state.queryHistory.filter((item) => !(item.code === record.code && item.start === record.start && item.end === record.end))].slice(0, 8);
   try { localStorage.setItem('macd-query-history', JSON.stringify(state.queryHistory)); } catch { /* 浏览器禁用存储时忽略 */ }
+  void persistQueryHistory();
 }
 
-try { state.queryHistory = JSON.parse(localStorage.getItem('macd-query-history') || '[]'); } catch { state.queryHistory = []; }
+async function persistQueryHistory() {
+  try {
+    await fetch('/api/query-history', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(state.queryHistory)
+    });
+  } catch { /* 服务不可用时仍保留浏览器本地记录 */ }
+}
+
+async function restoreQueryHistory() {
+  let localHistory = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem('macd-query-history') || '[]');
+    if (Array.isArray(saved)) localHistory = saved;
+  } catch { /* 忽略损坏的浏览器本地记录 */ }
+
+  try {
+    const response = await fetch('/api/query-history', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const persisted = await response.json();
+    state.queryHistory = Array.isArray(persisted) && persisted.length ? persisted : localHistory;
+    if (!persisted.length && localHistory.length) await persistQueryHistory();
+  } catch {
+    state.queryHistory = localHistory;
+  }
+}
+
+await restoreQueryHistory();
 render();
 loadInstrumentData(state.code);
