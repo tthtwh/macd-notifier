@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadPersistentEnv, startWebServer } from '../src/index.js';
+import { checkPersistentStorage, loadPersistentEnv, startWebServer } from '../src/index.js';
 
 test('页面服务能返回构建后的首页与静态资源', async () => {
   const root = await mkdtemp(join(tmpdir(), 'macd-lab-web-'));
@@ -41,6 +41,16 @@ test('从挂载目录 .env 加载 SendKey，且不覆盖已有环境变量', asy
   }), true);
   assert.equal(env.SERVERCHAN_SENDKEY, 'persisted-key');
   assert.equal(env.PORT, '8080');
+});
+
+test('启动时验证持久化目录可写且不留下探测文件', async () => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'macd-lab-data-'));
+  const messages = [];
+  assert.equal(await checkPersistentStorage({
+    dataDir,
+    logger: { info(message) { messages.push(message); }, error() {} }
+  }), true);
+  assert.match(messages[0], /持久化目录可写/);
 });
 
 test('最近查询记录写入挂载目录并能在服务重启后读取', async () => {

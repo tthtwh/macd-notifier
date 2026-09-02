@@ -1,6 +1,6 @@
 import { runDailyCheck } from './app.js';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -94,6 +94,24 @@ export async function loadPersistentEnv({
   return true;
 }
 
+export async function checkPersistentStorage({
+  dataDir = process.env.DATA_DIR ?? 'data',
+  logger = console
+} = {}) {
+  const directory = resolve(dataDir);
+  const probe = join(directory, `.write-test-${process.pid}`);
+  try {
+    await mkdir(directory, { recursive: true });
+    await writeFile(probe, 'ok', 'utf8');
+    await unlink(probe);
+    logger.info(`持久化目录可写：${directory}`);
+    return true;
+  } catch (error) {
+    logger.error(`[持久化目录不可写] ${directory}：${error.message}`);
+    return false;
+  }
+}
+
 async function serveRequest(request, response, webRoot, queryHistoryFile) {
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
   if (pathname === '/api/query-history') {
@@ -123,7 +141,8 @@ async function serveQueryHistory(request, response, queryHistoryFile) {
       await writeFile(queryHistoryFile, `${JSON.stringify(history, null, 2)}\n`, 'utf8');
       sendJson(response, 200, { ok: true });
     } catch (error) {
-      sendJson(response, error?.statusCode ?? 400, { error: error.message });
+      if (!error?.statusCode) throw error;
+      sendJson(response, error.statusCode, { error: error.message });
     }
     return;
   }
@@ -147,14 +166,14 @@ async function readJsonBody(request) {
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new Error('查询记录格式无效');
+    throw requestError('查询记录格式无效');
   }
 }
 
 function validateQueryHistory(value) {
-  if (!Array.isArray(value)) throw new Error('查询记录必须是数组');
+  if (!Array.isArray(value)) throw requestError('查询记录必须是数组');
   return value.slice(0, 8).map((item) => {
-    if (!item || !/^\d{6}$/.test(String(item.code ?? ''))) throw new Error('查询记录代码无效');
+    if (!item || !/^\d{6}$/.test(String(item.code ?? ''))) throw requestError('查询记录代码无效');
     return {
       code: String(item.code),
       name: String(item.name ?? '').slice(0, 100),
@@ -163,6 +182,12 @@ function validateQueryHistory(value) {
       queriedAt: String(item.queriedAt ?? '').slice(0, 50)
     };
   });
+}
+
+function requestError(message, statusCode = 400) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }
 
 function validDateOrEmpty(value) {
@@ -257,6 +282,7 @@ function pad(value) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await loadPersistentEnv();
+  await checkPersistentStorage();
   console.info('512760 MACD 通知服务已启动（Asia/Shanghai，工作日 14:55）');
   startScheduler();
   startWebServer();

@@ -21,6 +21,7 @@ const state = {
   historyPage: 1,
   historyPageSize: 100,
   queryHistory: [],
+  storageError: '',
   activeTab: 'annual',
 };
 
@@ -428,7 +429,7 @@ function render() {
         <form id="selectorForm" class="selector-form"><input id="selectorCode" value="${escapeHtml(state.code)}" inputmode="numeric" maxlength="6" placeholder="输入 ETF / 指数代码"/><button type="submit" ${state.loading ? 'disabled' : ''}>查询</button></form>
         <div class="notifier-card"><strong>512760 自动通知</strong><span>固定 MACD 12 / 26 / 9</span><span>工作日 14:55 · Server酱</span></div>
         <div class="etf-group"><h3>常用 ETF / 指数</h3>${commonInstruments.map(([code, name]) => `<button class="etf-item ${state.code === code ? 'active' : ''}" data-etf-code="${code}" data-start="" data-end=""><span>${name}</span><b>${code}</b></button>`).join('')}</div>
-        <div class="etf-group recent-group"><h3>最近查询</h3>${recentCodes.length ? recentCodes.map((item) => `<button class="etf-item ${state.code === item.code ? 'active' : ''}" data-etf-code="${item.code}" data-start="${item.start || ''}" data-end="${item.end || ''}"><span>${escapeHtml(item.name.replace(item.code, '').trim() || '标的')}</span><b>${item.code}</b></button>`).join('') : '<p class="sidebar-empty">暂无记录</p>'}</div>
+        <div class="etf-group recent-group"><h3>最近查询</h3>${state.storageError ? `<p class="sidebar-empty">${escapeHtml(state.storageError)}</p>` : ''}${recentCodes.length ? recentCodes.map((item) => `<button class="etf-item ${state.code === item.code ? 'active' : ''}" data-etf-code="${item.code}" data-start="${item.start || ''}" data-end="${item.end || ''}"><span>${escapeHtml(item.name.replace(item.code, '').trim() || '标的')}</span><b>${item.code}</b></button>`).join('') : '<p class="sidebar-empty">暂无记录</p>'}</div>
       </aside>
 
       <main class="workspace">
@@ -582,12 +583,17 @@ function rememberQuery() {
 
 async function persistQueryHistory() {
   try {
-    await fetch('/api/query-history', {
+    const response = await fetch('/api/query-history', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(state.queryHistory)
     });
-  } catch { /* 服务不可用时仍保留浏览器本地记录 */ }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.storageError = '';
+  } catch {
+    state.storageError = '挂载目录写入失败，记录暂存在当前浏览器';
+    render();
+  }
 }
 
 async function restoreQueryHistory() {

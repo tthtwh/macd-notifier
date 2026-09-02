@@ -19,6 +19,8 @@ COPY --chown=node:node --from=build /app/dist ./dist
 ENV PORT=8080
 EXPOSE 8080
 
-USER node
+# 极空间的宿主机挂载目录通常归 root，容器需要写入 /app/data 持久化文件。
+# 根文件系统仍由 Compose 设为只读，且启用 no-new-privileges。
+USER root
 
 CMD ["node", "src/index.js"]
