@@ -1,5 +1,6 @@
 import './style.css';
 import { fetchInstrumentData, normalizeInstrumentCode } from './market-data.js';
+import { applyTradeCapital } from './trade-capital.js';
 
 const fmt = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
 const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -69,7 +70,6 @@ function backtest(rows) {
         holdingDays: i - entry.index,
         grossReturn,
         netReturn,
-        profit: state.capital * netReturn,
         risk,
         rMultiple: risk > 0.00001 ? netReturn / risk : null,
         reason: '绿柱首次出现',
@@ -158,7 +158,7 @@ function chartSvg(rows, trades) {
 
 function renderLegacy() {
   const macdRows = calculateMacd(state.data);
-  const trades = backtest(macdRows);
+  const trades = applyTradeCapital(backtest(macdRows), state.capital);
   const stats = summarize(trades);
   const annualRows = summarizeByYear(state.data, trades);
   const latest = state.data.at(-1);
@@ -222,10 +222,10 @@ function renderLegacy() {
         <div class="section-heading"><div><span>TRADE LEDGER</span><h2>逐笔交易明细</h2></div><button id="exportBtn" class="text-btn">导出结果 ↗</button></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>#</th><th>买入日期</th><th>卖出日期</th><th>买入价</th><th>卖出价</th><th>持有</th><th>净收益</th><th>收益金额</th><th>R 倍数</th><th>离场原因</th></tr></thead>
+            <thead><tr><th>#</th><th>买入日期</th><th>卖出日期</th><th>买入价</th><th>卖出价</th><th>持有</th><th>净收益</th><th>收益金额</th><th>当前资金</th><th>R 倍数</th><th>离场原因</th></tr></thead>
             <tbody>${trades.slice().reverse().map((trade, index) => `<tr>
               <td>${String(trades.length - index).padStart(2, '0')}</td><td>${trade.entryDate}</td><td>${trade.exitDate}</td><td>${trade.entryPrice.toFixed(3)}</td><td>${trade.exitPrice.toFixed(3)}</td><td>${trade.holdingDays} 天</td>
-              <td><span class="pill ${trade.netReturn >= 0 ? 'gain' : 'loss'}">${percent(trade.netReturn)}</span></td><td class="${trade.profit >= 0 ? 'positive' : 'negative'}">${trade.profit >= 0 ? '+' : ''}${money.format(trade.profit)}</td><td>${trade.rMultiple === null ? '—' : trade.rMultiple.toFixed(2)}</td><td>${trade.reason}</td>
+              <td><span class="pill ${trade.netReturn >= 0 ? 'gain' : 'loss'}">${percent(trade.netReturn)}</span></td><td class="${trade.profit >= 0 ? 'positive' : 'negative'}">${trade.profit >= 0 ? '+' : ''}${money.format(trade.profit)}</td><td><strong>${money.format(trade.currentCapital)}</strong></td><td>${trade.rMultiple === null ? '—' : trade.rMultiple.toFixed(2)}</td><td>${trade.reason}</td>
             </tr>`).join('')}</tbody>
           </table>
         </div>
@@ -265,7 +265,10 @@ function withinPeriod(date) {
 function renderLong() {
   const allMacdRows = calculateMacd(state.data);
   const filteredRows = allMacdRows.filter((row) => withinPeriod(row.date));
-  const trades = backtest(allMacdRows).filter((trade) => withinPeriod(trade.entryDate) && withinPeriod(trade.exitDate));
+  const trades = applyTradeCapital(
+    backtest(allMacdRows).filter((trade) => withinPeriod(trade.entryDate) && withinPeriod(trade.exitDate)),
+    state.capital,
+  );
   const stats = summarize(trades);
   const annualRows = summarizeByYear(filteredRows, trades);
   const historyRows = filteredRows.slice().reverse();
@@ -324,8 +327,8 @@ function renderLong() {
       <section class="panel">
         <div class="section-title"><h2>逐笔交易</h2><button id="exportBtn" class="secondary-button">导出交易 CSV</button></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>#</th><th>买入日期</th><th>卖出日期</th><th>买入价</th><th>卖出价</th><th>持有天数</th><th>净收益</th><th>收益金额</th><th>R 倍数</th><th>离场原因</th></tr></thead>
-          <tbody>${trades.length ? trades.slice().reverse().map((trade, index) => `<tr><td>${trades.length - index}</td><td>${trade.entryDate}</td><td>${trade.exitDate}</td><td>${trade.entryPrice.toFixed(3)}</td><td>${trade.exitPrice.toFixed(3)}</td><td>${trade.holdingDays}</td><td class="${trade.netReturn >= 0 ? 'up' : 'down'}">${percent(trade.netReturn)}</td><td class="${trade.profit >= 0 ? 'up' : 'down'}">${trade.profit >= 0 ? '+' : ''}${money.format(trade.profit)}</td><td>${trade.rMultiple === null ? '—' : trade.rMultiple.toFixed(2)}</td><td>${trade.reason}</td></tr>`).join('') : '<tr><td colspan="10" class="empty">该区间没有已完成交易</td></tr>'}</tbody>
+          <thead><tr><th>#</th><th>买入日期</th><th>卖出日期</th><th>买入价</th><th>卖出价</th><th>持有天数</th><th>净收益</th><th>收益金额</th><th>当前资金</th><th>R 倍数</th><th>离场原因</th></tr></thead>
+          <tbody>${trades.length ? trades.slice().reverse().map((trade, index) => `<tr><td>${trades.length - index}</td><td>${trade.entryDate}</td><td>${trade.exitDate}</td><td>${trade.entryPrice.toFixed(3)}</td><td>${trade.exitPrice.toFixed(3)}</td><td>${trade.holdingDays}</td><td class="${trade.netReturn >= 0 ? 'up' : 'down'}">${percent(trade.netReturn)}</td><td class="${trade.profit >= 0 ? 'up' : 'down'}">${trade.profit >= 0 ? '+' : ''}${money.format(trade.profit)}</td><td><strong>${money.format(trade.currentCapital)}</strong></td><td>${trade.rMultiple === null ? '—' : trade.rMultiple.toFixed(2)}</td><td>${trade.reason}</td></tr>`).join('') : '<tr><td colspan="11" class="empty">该区间没有已完成交易</td></tr>'}</tbody>
         </table></div>
       </section>
 
@@ -388,7 +391,10 @@ const commonInstruments = [
 function render() {
   const allMacdRows = calculateMacd(state.data);
   const filteredRows = allMacdRows.filter((row) => withinPeriod(row.date));
-  const trades = backtest(allMacdRows).filter((trade) => withinPeriod(trade.entryDate) && withinPeriod(trade.exitDate));
+  const trades = applyTradeCapital(
+    backtest(allMacdRows).filter((trade) => withinPeriod(trade.entryDate) && withinPeriod(trade.exitDate)),
+    state.capital,
+  );
   const stats = summarize(trades);
   const annualRows = summarizeByYear(filteredRows, trades);
   const historyRows = filteredRows.slice().reverse();
@@ -411,7 +417,7 @@ function render() {
     tableTitle = '逐笔交易';
     tableMeta = `${trades.length} 笔已完成交易`;
     tableActions = '<button id="exportBtn" class="secondary-button">导出 CSV</button>';
-    tableHtml = `<table><thead><tr><th>#</th><th>买入日期</th><th>卖出日期</th><th>买入价</th><th>卖出价</th><th>持有天数</th><th>净收益</th><th>收益金额</th><th>R 倍数</th><th>离场原因</th></tr></thead><tbody>${trades.length ? trades.slice().reverse().map((trade, index) => `<tr><td>${trades.length - index}</td><td>${trade.entryDate}</td><td>${trade.exitDate}</td><td>${trade.entryPrice.toFixed(3)}</td><td>${trade.exitPrice.toFixed(3)}</td><td>${trade.holdingDays}</td><td class="${trade.netReturn >= 0 ? 'up' : 'down'}">${percent(trade.netReturn)}</td><td class="${trade.profit >= 0 ? 'up' : 'down'}">${trade.profit >= 0 ? '+' : ''}${money.format(trade.profit)}</td><td>${trade.rMultiple === null ? '—' : trade.rMultiple.toFixed(2)}</td><td>${trade.reason}</td></tr>`).join('') : '<tr><td colspan="10" class="empty">该区间没有已完成交易</td></tr>'}</tbody></table>`;
+    tableHtml = `<table><thead><tr><th>#</th><th>买入日期</th><th>卖出日期</th><th>买入价</th><th>卖出价</th><th>持有天数</th><th>净收益</th><th>收益金额</th><th>当前资金</th><th>R 倍数</th><th>离场原因</th></tr></thead><tbody>${trades.length ? trades.slice().reverse().map((trade, index) => `<tr><td>${trades.length - index}</td><td>${trade.entryDate}</td><td>${trade.exitDate}</td><td>${trade.entryPrice.toFixed(3)}</td><td>${trade.exitPrice.toFixed(3)}</td><td>${trade.holdingDays}</td><td class="${trade.netReturn >= 0 ? 'up' : 'down'}">${percent(trade.netReturn)}</td><td class="${trade.profit >= 0 ? 'up' : 'down'}">${trade.profit >= 0 ? '+' : ''}${money.format(trade.profit)}</td><td><strong>${money.format(trade.currentCapital)}</strong></td><td>${trade.rMultiple === null ? '—' : trade.rMultiple.toFixed(2)}</td><td>${trade.reason}</td></tr>`).join('') : '<tr><td colspan="11" class="empty">该区间没有已完成交易</td></tr>'}</tbody></table>`;
   }
 
   if (state.activeTab === 'history') {
@@ -549,8 +555,8 @@ async function loadInstrumentData(value) {
 }
 
 function exportTrades(trades) {
-  const header = ['序号', '买入日期', '卖出日期', '买入价', '卖出价', '持有天数', '净收益率', '收益金额', 'R倍数', '离场原因'];
-  const rows = trades.map((trade, index) => [index + 1, trade.entryDate, trade.exitDate, trade.entryPrice, trade.exitPrice, trade.holdingDays, (trade.netReturn * 100).toFixed(2) + '%', trade.profit.toFixed(2), trade.rMultiple?.toFixed(2) ?? '', trade.reason]);
+  const header = ['序号', '买入日期', '卖出日期', '买入价', '卖出价', '持有天数', '净收益率', '收益金额', '当前资金', 'R倍数', '离场原因'];
+  const rows = trades.map((trade, index) => [index + 1, trade.entryDate, trade.exitDate, trade.entryPrice, trade.exitPrice, trade.holdingDays, (trade.netReturn * 100).toFixed(2) + '%', trade.profit.toFixed(2), trade.currentCapital.toFixed(2), trade.rMultiple?.toFixed(2) ?? '', trade.reason]);
   const csv = '\ufeff' + [header, ...rows].map((row) => row.join(',')).join('\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const link = Object.assign(document.createElement('a'), { href: url, download: `${state.symbol.replace(/\s/g, '_')}_MACD交易明细.csv` });
