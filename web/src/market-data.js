@@ -102,14 +102,33 @@ async function fetchTencentEtfData(instrument, { fetchImpl, onProgress }) {
     endDate = previousDate(earliest);
   }
 
-  const rows = uniqueSortedRows(allRows.map((row) => ({ date: row[0], close: Number(row[2]) })));
+  const historicalRows = uniqueSortedRows(allRows.map((row) => ({ date: row[0], close: Number(row[2]) })));
+  const { rows, appended } = appendClosedRealtimeQuote(historicalRows, latestQuote, instrument.symbol);
   if (rows.length < 40) throw new Error('没有找到足够的日线数据，请确认代码是沪深 ETF 或 88 开头的同花顺指数');
   const name = latestQuote?.qt?.[instrument.symbol]?.[1] || 'ETF';
   return {
     instrument,
     rows,
     name,
-    source: `上市至今 · 前复权日线 · ${rows.length} 条`
+    source: `上市至今 · 前复权日线${appended ? '（已补今日收盘）' : ''} · ${rows.length} 条`
+  };
+}
+
+export function appendClosedRealtimeQuote(rows, quote, symbol) {
+  const realtime = quote?.qt?.[symbol];
+  const timestamp = String(realtime?.[30] ?? '');
+  const close = Number(realtime?.[3]);
+
+  if (!/^\d{14}$/.test(timestamp) || timestamp.slice(8, 14) < '150000' || !Number.isFinite(close) || close <= 0) {
+    return { rows, appended: false };
+  }
+
+  const date = `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`;
+  if (rows.at(-1)?.date >= date) return { rows, appended: false };
+
+  return {
+    rows: uniqueSortedRows([...rows, { date, close }]),
+    appended: true
   };
 }
 

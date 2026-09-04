@@ -1,11 +1,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  appendClosedRealtimeQuote,
   fetchInstrumentData,
   normalizeInstrumentCode,
   parseJsonp,
   parseThsYearRows
 } from '../web/src/market-data.js';
+
+test('15:00 后日 K 未更新时补入 ETF 当日收盘价', () => {
+  const historicalRows = [{ date: '2026-09-03', close: 1.066 }];
+  const realtime = [];
+  realtime[3] = '1.036';
+  realtime[30] = '20260904151851';
+
+  assert.deepEqual(
+    appendClosedRealtimeQuote(historicalRows, { qt: { sh512760: realtime } }, 'sh512760'),
+    {
+      rows: [
+        { date: '2026-09-03', close: 1.066 },
+        { date: '2026-09-04', close: 1.036 }
+      ],
+      appended: true
+    }
+  );
+});
+
+test('15:00 前不补未完成日 K，正式日 K 已存在时不重复', () => {
+  const rows = [{ date: '2026-09-03', close: 1.066 }];
+  const beforeClose = [];
+  beforeClose[3] = '1.040';
+  beforeClose[30] = '20260904145500';
+  assert.deepEqual(
+    appendClosedRealtimeQuote(rows, { qt: { sh512760: beforeClose } }, 'sh512760'),
+    { rows, appended: false }
+  );
+
+  const completedRows = [...rows, { date: '2026-09-04', close: 1.036 }];
+  const afterClose = [];
+  afterClose[3] = '1.036';
+  afterClose[30] = '20260904151851';
+  assert.deepEqual(
+    appendClosedRealtimeQuote(completedRows, { qt: { sh512760: afterClose } }, 'sh512760'),
+    { rows: completedRows, appended: false }
+  );
+});
 
 test('自动区分沪深 ETF 和 88 开头的同花顺指数', () => {
   assert.deepEqual(normalizeInstrumentCode('510300'), {
