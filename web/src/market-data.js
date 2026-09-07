@@ -40,12 +40,13 @@ export function parseThsYearRows(text) {
   const payload = parseJsonp(text);
   if (typeof payload?.data !== 'string') return [];
   return payload.data.split(';').map((line) => {
-    const [compactDate, , , , close] = line.split(',');
+    const [compactDate, open, , , close] = line.split(',');
     return {
       date: /^\d{8}$/.test(compactDate)
         ? `${compactDate.slice(0, 4)}-${compactDate.slice(4, 6)}-${compactDate.slice(6, 8)}`
         : '',
-      close: Number(close)
+      close: Number(close),
+      open: Number(open)
     };
   }).filter((row) => row.date && Number.isFinite(row.close) && row.close > 0);
 }
@@ -102,7 +103,7 @@ async function fetchTencentEtfData(instrument, { fetchImpl, onProgress }) {
     endDate = previousDate(earliest);
   }
 
-  const historicalRows = uniqueSortedRows(allRows.map((row) => ({ date: row[0], close: Number(row[2]) })));
+  const historicalRows = uniqueSortedRows(allRows.map((row) => ({ date: row[0], open: Number(row[1]), close: Number(row[2]) })));
   const { rows, appended } = appendClosedRealtimeQuote(historicalRows, latestQuote, instrument.symbol);
   if (rows.length < 40) throw new Error('没有找到足够的日线数据，请确认代码是沪深 ETF 或 88 开头的同花顺指数');
   const name = latestQuote?.qt?.[instrument.symbol]?.[1] || 'ETF';
@@ -127,7 +128,7 @@ export function appendClosedRealtimeQuote(rows, quote, symbol) {
   if (rows.at(-1)?.date >= date) return { rows, appended: false };
 
   return {
-    rows: uniqueSortedRows([...rows, { date, close }]),
+    rows: uniqueSortedRows([...rows, { date, close, ...(Number(realtime?.[5]) > 0 ? { open: Number(realtime[5]) } : {}) }]),
     appended: true
   };
 }

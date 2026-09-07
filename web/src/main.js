@@ -1,6 +1,7 @@
 import './style.css';
 import { fetchInstrumentData, normalizeInstrumentCode } from './market-data.js';
 import { applyTradeCapital } from './trade-capital.js';
+import { runBacktest } from './backtest.js';
 
 const fmt = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
 const money = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -12,6 +13,7 @@ const state = {
   slow: 26,
   signal: 9,
   capital: 100000,
+  executionMode: 'sameClose',
   feeRate: 0.0003,
   data: [],
   source: '正在连接在线行情…',
@@ -48,36 +50,7 @@ function calculateMacd(rows) {
 }
 
 function backtest(rows) {
-  const trades = [];
-  let entry = null;
-  for (let i = state.slow + state.signal; i < rows.length; i += 1) {
-    const row = rows[i];
-    const previous = rows[i - 1];
-    const buySignal = !entry && row.hist > 0 && previous.hist <= 0;
-    const sellSignal = entry && previous.hist >= 0 && row.hist < 0;
-    if (buySignal) entry = { ...row, index: i };
-    if (sellSignal) {
-      const grossReturn = (row.close - entry.close) / entry.close;
-      const netReturn = grossReturn - state.feeRate * 2;
-      const slice = rows.slice(entry.index, i + 1);
-      const low = Math.min(...slice.map((item) => item.close));
-      const risk = Math.max(0, (entry.close - low) / entry.close);
-      trades.push({
-        entryDate: entry.date,
-        exitDate: row.date,
-        entryPrice: entry.close,
-        exitPrice: row.close,
-        holdingDays: i - entry.index,
-        grossReturn,
-        netReturn,
-        risk,
-        rMultiple: risk > 0.00001 ? netReturn / risk : null,
-        reason: '绿柱首次出现',
-      });
-      entry = null;
-    }
-  }
-  return trades;
+  return runBacktest(rows, state);
 }
 
 function summarize(trades) {
@@ -445,12 +418,14 @@ function render() {
         </header>
 
         <form id="filterForm" class="filter-bar">
+          <label><span>成交方式</span><select id="executionMode"><option value="sameClose" ${state.executionMode === 'sameClose' ? 'selected' : ''}>当天收盘</option><option value="nextOpen" ${state.executionMode === 'nextOpen' ? 'selected' : ''}>次日开盘（集合竞价模拟）</option></select></label>
           <label><span>开始</span><input id="startDate" type="date" value="${state.startDate}" /></label>
           <label><span>结束</span><input id="endDate" type="date" value="${state.endDate}" /></label>
           <label><span>资金</span><input id="capital" type="number" min="1000" step="1000" value="${state.capital}" /></label>
           <label><span>MACD</span><div class="triple-input"><input id="fast" type="number" value="${state.fast}"/><input id="slow" type="number" value="${state.slow}"/><input id="signal" type="number" value="${state.signal}"/></div></label>
           <button type="submit">应用条件</button>
         </form>
+        <p class="execution-note">${state.executionMode === 'nextOpen' ? '收盘确认翻色，下一交易日按开盘价模拟成交；尚无下一交易日价格的交易不计入已完成交易。' : '按信号当天最终收盘价模拟成交，属于理想化回测，不等同于 14:59 实际成交。'} 日期筛选按实际买卖日期，年度交易收益计入卖出年份。</p>
         ${state.error ? `<div class="workspace-error">${escapeHtml(state.error)}</div>` : ''}
 
         <div class="summary-grid">
@@ -480,6 +455,10 @@ function render() {
 }
 
 function bindEvents(trades, filteredRows) {
+  document.querySelector('#executionMode').addEventListener('change', (event) => {
+    state.executionMode = event.target.value;
+    document.querySelector('#filterForm').requestSubmit();
+  });
   document.querySelector('#selectorForm').addEventListener('submit', (event) => {
     event.preventDefault();
     state.startDate = '';
@@ -555,8 +534,8 @@ async function loadInstrumentData(value) {
 }
 
 function exportTrades(trades) {
-  const header = ['序号', '买入日期', '卖出日期', '买入价', '卖出价', '持有天数', '净收益率', '收益金额', '当前资金', 'R倍数', '离场原因'];
-  const rows = trades.map((trade, index) => [index + 1, trade.entryDate, trade.exitDate, trade.entryPrice, trade.exitPrice, trade.holdingDays, (trade.netReturn * 100).toFixed(2) + '%', trade.profit.toFixed(2), trade.currentCapital.toFixed(2), trade.rMultiple?.toFixed(2) ?? '', trade.reason]);
+  const header = ['序号', '买入日期', '卖出日期', '买入价', '卖出价', '持有天数', '净收益率', '收益金额', '当前资金', 'R倍数', '离场原因', '成交方式', '买入信号日期', '卖出信号日期'];
+  const rows = trades.map((trade, index) => [index + 1, trade.entryDate, trade.exitDate, trade.entryPrice, trade.exitPrice, trade.holdingDays, (trade.netReturn * 100).toFixed(2) + '%', trade.profit.toFixed(2), trade.currentCapital.toFixed(2), trade.rMultiple?.toFixed(2) ?? '', trade.reason, state.executionMode === 'nextOpen' ? '次日开盘' : '当天收盘', trade.entrySignalDate, trade.exitSignalDate]);
   const csv = '\ufeff' + [header, ...rows].map((row) => row.join(',')).join('\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   const link = Object.assign(document.createElement('a'), { href: url, download: `${state.symbol.replace(/\s/g, '_')}_MACD交易明细.csv` });

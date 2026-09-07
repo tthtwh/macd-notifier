@@ -64,8 +64,8 @@ test('解析同花顺指数 JSONP 和年度日线', () => {
   assert.deepEqual(
     parseThsYearRows('callback({"data":"20260105,1,3,1,2.5,10;20260106,2,4,2,3.5,20"})'),
     [
-      { date: '2026-01-05', close: 2.5 },
-      { date: '2026-01-06', close: 3.5 }
+      { date: '2026-01-05', close: 2.5, open: 1 },
+      { date: '2026-01-06', close: 3.5, open: 2 }
     ]
   );
 });
