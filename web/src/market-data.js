@@ -40,13 +40,15 @@ export function parseThsYearRows(text) {
   const payload = parseJsonp(text);
   if (typeof payload?.data !== 'string') return [];
   return payload.data.split(';').map((line) => {
-    const [compactDate, open, , , close] = line.split(',');
+    const [compactDate, open, , , close, volume] = line.split(',');
     return {
       date: /^\d{8}$/.test(compactDate)
         ? `${compactDate.slice(0, 4)}-${compactDate.slice(4, 6)}-${compactDate.slice(6, 8)}`
         : '',
       close: Number(close),
-      open: Number(open)
+      open: Number(open),
+      // 同花顺年度日线成交量为股，统一为手（100 股/份）。
+      ...volumeFields(volume, 100)
     };
   }).filter((row) => row.date && Number.isFinite(row.close) && row.close > 0);
 }
@@ -103,7 +105,12 @@ async function fetchTencentEtfData(instrument, { fetchImpl, onProgress }) {
     endDate = previousDate(earliest);
   }
 
-  const historicalRows = uniqueSortedRows(allRows.map((row) => ({ date: row[0], open: Number(row[1]), close: Number(row[2]) })));
+  const currentQuote = parseRealtimeQuote(latestQuote, instrument.symbol);
+  const historicalRows = uniqueSortedRows(allRows.map((row) => ({
+    date: row[0], open: Number(row[1]), close: Number(row[2]),
+    high: Number(row[3]), low: Number(row[4]), ...volumeFields(row[5]),
+  })))
+    .filter(row => !currentQuote || currentQuote.completed || row.date < currentQuote.date);
   const { rows, appended } = appendClosedRealtimeQuote(historicalRows, latestQuote, instrument.symbol);
   if (rows.length < 40) throw new Error('没有找到足够的日线数据，请确认代码是沪深 ETF 或 88 开头的同花顺指数');
   const name = latestQuote?.qt?.[instrument.symbol]?.[1] || 'ETF';
@@ -111,7 +118,22 @@ async function fetchTencentEtfData(instrument, { fetchImpl, onProgress }) {
     instrument,
     rows,
     name,
+    latestQuote: currentQuote,
     source: `上市至今 · 前复权日线${appended ? '（已补今日收盘）' : ''} · ${rows.length} 条`
+  };
+}
+
+export function parseRealtimeQuote(payload, symbol) {
+  const quote = payload?.qt?.[symbol];
+  const timestamp = String(quote?.[30] ?? '');
+  const price = Number(quote?.[3]);
+  const open = Number(quote?.[5]);
+  if (!/^\d{14}$/.test(timestamp) || timestamp.slice(8) < '093000' || !Number.isFinite(price) || price <= 0) return null;
+  return {
+    date: `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`,
+    price, open: Number.isFinite(open) && open > 0 ? open : undefined,
+    timestamp, completed: timestamp.slice(8) >= '150000',
+    ...volumeFields(quote?.[6]),
   };
 }
 
@@ -127,10 +149,23 @@ export function appendClosedRealtimeQuote(rows, quote, symbol) {
   const date = `${timestamp.slice(0, 4)}-${timestamp.slice(4, 6)}-${timestamp.slice(6, 8)}`;
   if (rows.at(-1)?.date >= date) return { rows, appended: false };
 
+  const high = Number(realtime?.[33]);
+  const low = Number(realtime?.[34]);
   return {
-    rows: uniqueSortedRows([...rows, { date, close, ...(Number(realtime?.[5]) > 0 ? { open: Number(realtime[5]) } : {}) }]),
+    rows: uniqueSortedRows([...rows, { date, close,
+      ...(Number(realtime?.[5]) > 0 ? { open: Number(realtime[5]) } : {}),
+      ...(Number.isFinite(high) ? { high } : {}),
+      ...(Number.isFinite(low) ? { low } : {}),
+      ...volumeFields(realtime?.[6]),
+    }]),
     appended: true
   };
+}
+
+function volumeFields(value, divisor = 1) {
+  if (value == null || String(value).trim() === '') return {};
+  const volume = Number(value);
+  return Number.isFinite(volume) && volume >= 0 ? { volumeLots: volume / divisor } : {};
 }
 
 function uniqueSortedRows(rows) {

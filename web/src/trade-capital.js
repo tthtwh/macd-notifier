@@ -18,3 +18,9 @@ export function applyTradeCapital(trades, initialCapital) {
     };
   });
 }
+
+export function valueOpenPosition(position, capitalBefore) {
+  if (!position) return null;
+  const unrealizedProfit = capitalBefore * position.unrealizedReturn;
+  return { ...position, capitalBefore, unrealizedProfit, equity: capitalBefore + unrealizedProfit };
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateMacd, estimateZeroHistClose, getSignal } from '../src/macd.js';
+import { calculateMacd, estimateZeroHistClose, getSignal, MACD_PARAMS } from '../src/macd.js';
 
 test('固定价格的 MACD Hist 为 0', () => {
   const result = calculateMacd(Array(40).fill(1));
@@ -8,6 +8,7 @@ test('固定价格的 MACD Hist 为 0', () => {
 });
 
 test('MACD 使用固定 12,26,9 且能识别翻红/翻绿', () => {
+  assert.deepEqual(MACD_PARAMS, { short: 12, long: 26, signal: 9 });
   const buy = calculateMacd([...Array(39).fill(1), 1.1]);
   const sell = calculateMacd([...Array(39).fill(1), 0.9]);
   assert.equal(getSignal(buy.at(-2).hist, buy.at(-1).hist), 'BUY');

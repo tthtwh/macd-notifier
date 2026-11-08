@@ -16,6 +16,13 @@ test('14:55 前安排当天，之后安排下一个工作日', () => {
   );
 });
 
+test('交易所休市期间不执行检查，国庆后首个交易日恢复', () => {
+  assert.equal(
+    nextRunTime(new Date('2026-09-30T15:00:00+08:00')).toISOString(),
+    '2026-10-08T06:55:00.000Z'
+  );
+});
+
 test('入口文件在当前平台能启动并保持调度进程', async () => {
   const entry = fileURLToPath(new URL('../src/index.js', import.meta.url));
   const child = spawn(process.execPath, [entry], {

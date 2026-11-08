@@ -6,6 +6,56 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkPersistentStorage, loadPersistentEnv, startWebServer } from '../src/index.js';
 
+test('历史成交 API 返回逐日数据，拒绝写入，错误不泄漏内部信息', async () => {
+  let fail = false;
+  const data = { rows: [{ date: '2026-09-17', volumeLots: 300, turnover: 400 }] };
+  const server = startWebServer({ port: 0, host: '127.0.0.1', logger: { info() {}, error() {} }, getMarketHistory: async () => {
+    if (fail) throw new Error('internal secret');
+    return data;
+  } });
+  await once(server, 'listening');
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/api/market-history`;
+    const response = await fetch(url);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), data);
+    assert.equal((await fetch(url, { method: 'POST' })).status, 405);
+    fail = true;
+    const failure = await fetch(url);
+    assert.equal(failure.status, 502);
+    assert.doesNotMatch(await failure.text(), /internal secret/);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
+test('大盘 API 返回成交数据，失败明确返回 502 且不泄露内部错误', async () => {
+  let fail = false;
+  const server = startWebServer({
+    port: 0, host: '127.0.0.1', logger: { info() {}, error() {} },
+    getMarketOverview: async () => {
+      if (fail) throw new Error('internal secret');
+      return { date: '2026-09-29', turnover: 6000000, volumeLots: 2000 };
+    },
+  });
+  await once(server, 'listening');
+  try {
+    const url = `http://127.0.0.1:${server.address().port}/api/market-overview`;
+    const response = await fetch(url);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).turnover, 6000000);
+    fail = true;
+    const failure = await fetch(url);
+    assert.equal(failure.status, 502);
+    assert.doesNotMatch(await failure.text(), /internal secret/);
+    assert.equal((await fetch(url, { method: 'POST' })).status, 405);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('页面服务能返回构建后的首页与静态资源', async () => {
   const root = await mkdtemp(join(tmpdir(), 'macd-lab-web-'));
   await mkdir(join(root, 'assets'));
@@ -92,4 +142,33 @@ test('最近查询记录写入挂载目录并能在服务重启后读取', async
     second.close();
     await once(second, 'close');
   }
+});
+
+test('主策略 API 读写挂载目录，非法代码返回 400', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'macd-lab-web-'));
+  const dataDir = await mkdtemp(join(tmpdir(), 'macd-lab-data-'));
+  await writeFile(join(root, 'index.html'), '<h1>MACD Lab</h1>');
+  const server = startWebServer({ port: 0, host: '127.0.0.1', root, dataDir, logger: { info() {}, error() {} } });
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const post = (body) => fetch(`${base}/api/strategy-config`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  try {
+    assert.equal((await (await fetch(`${base}/api/strategy-config`)).json()).primaryCode, '512760');
+    const saved = await post({ primaryCode: '510300' });
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).primaryCode, '510300');
+    assert.equal((await (await fetch(`${base}/api/strategy-config`)).json()).primaryCode, '510300');
+    assert.equal((await post({ primaryCode: 'abc' })).status, 400);
+    assert.equal((await fetch(`${base}/api/strategy-config`, { method: 'PUT' })).status, 405);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+
+  assert.equal(JSON.parse(await readFile(join(dataDir, 'strategy-config.json'), 'utf8')).primaryCode, '510300');
 });

@@ -16,3 +16,4 @@ web/macd-etf-linux-arm64.oci.tar
 web/scripts
 *.log
 *.tar
+DEPLOYMENT.private.md

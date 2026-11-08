@@ -1,4 +1,8 @@
 import { runDailyCheck } from './app.js';
+import { createMarketOverviewLoader } from './market-overview.js';
+import { createMarketHistoryLoader } from './market-history.js';
+import { createDividendBasketLoader } from './dividend-basket.js';
+import { readStrategyConfig, writeStrategyConfig } from './strategy-config.js';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -7,6 +11,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const TARGET_HOUR = 14;
 const TARGET_MINUTE = 55;
+// 上海证券交易所公布的 2026 年休市日；周末由 isWeekend 单独处理。
+const MARKET_CLOSED_DATES = new Set([
+  '2026-01-01', '2026-01-02',
+  '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23',
+  '2026-04-06',
+  '2026-05-01', '2026-05-04', '2026-05-05',
+  '2026-06-19',
+  '2026-09-25',
+  '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
+]);
 const DEFAULT_WEB_ROOT = fileURLToPath(new URL('../dist/', import.meta.url));
 const MIME_TYPES = {
   '.css': 'text/css; charset=utf-8',
@@ -21,7 +35,7 @@ export function nextRunTime(now = new Date()) {
   const parts = shanghaiParts(now);
   let candidate = new Date(`${parts.date}T${pad(TARGET_HOUR)}:${pad(TARGET_MINUTE)}:00+08:00`);
 
-  if (candidate <= now || isWeekend(candidate)) candidate = nextWeekday(candidate);
+  if (candidate <= now || isMarketClosed(candidate)) candidate = nextTradingDay(candidate);
   return candidate;
 }
 
@@ -43,12 +57,16 @@ export function startWebServer({
   host = '0.0.0.0',
   root = DEFAULT_WEB_ROOT,
   dataDir = process.env.DATA_DIR ?? 'data',
+  getMarketOverview = createMarketOverviewLoader(),
+  getMarketHistory = createMarketHistoryLoader(),
+  getDividendBasket = createDividendBasketLoader({ cacheFile: join(resolve(dataDir), 'dividend-basket.json') }),
   logger = console
 } = {}) {
   const webRoot = resolve(root);
   const queryHistoryFile = join(resolve(dataDir), 'query-history.json');
+  const strategyConfigFile = join(resolve(dataDir), 'strategy-config.json');
   const server = createServer((request, response) => {
-    serveRequest(request, response, webRoot, queryHistoryFile).catch((error) => {
+    serveRequest(request, response, webRoot, queryHistoryFile, strategyConfigFile, getMarketOverview, getMarketHistory, getDividendBasket).catch((error) => {
       logger.error(`[页面服务失败] ${error.message}`);
       if (!response.headersSent) response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
       response.end('Internal Server Error');
@@ -112,13 +130,62 @@ export async function checkPersistentStorage({
   }
 }
 
-async function serveRequest(request, response, webRoot, queryHistoryFile) {
+async function serveRequest(request, response, webRoot, queryHistoryFile, strategyConfigFile, getMarketOverview, getMarketHistory, getDividendBasket) {
   const pathname = new URL(request.url ?? '/', 'http://localhost').pathname;
+  if (pathname === '/api/strategy-config') {
+    await serveStrategyConfig(request, response, strategyConfigFile);
+    return;
+  }
+  if (pathname === '/api/dividend-basket') {
+    if (request.method !== 'GET') {
+      response.writeHead(405, { allow: 'GET' });
+      response.end();
+      return;
+    }
+    try {
+      sendJson(response, 200, await getDividendBasket());
+    } catch {
+      sendJson(response, 502, { error: '红利低波数据暂时不可用，请稍后刷新' });
+    }
+    return;
+  }
+  if (pathname === '/api/market-overview' || pathname === '/api/market-history') {
+    if (request.method !== 'GET') {
+      response.writeHead(405, { allow: 'GET' });
+      response.end();
+      return;
+    }
+    try {
+      sendJson(response, 200, await (pathname === '/api/market-history' ? getMarketHistory() : getMarketOverview()));
+    } catch {
+      sendJson(response, 502, { error: '大盘成交数据暂时不可用，请稍后刷新' });
+    }
+    return;
+  }
   if (pathname === '/api/query-history') {
     await serveQueryHistory(request, response, queryHistoryFile);
     return;
   }
   await serveStatic(request, response, webRoot);
+}
+
+async function serveStrategyConfig(request, response, strategyConfigFile) {
+  if (request.method === 'GET') {
+    sendJson(response, 200, await readStrategyConfig(strategyConfigFile));
+    return;
+  }
+
+  if (request.method === 'POST') {
+    try {
+      sendJson(response, 200, await writeStrategyConfig(await readJsonBody(request), strategyConfigFile));
+    } catch (error) {
+      sendJson(response, error?.statusCode ?? 400, { error: error.message });
+    }
+    return;
+  }
+
+  response.writeHead(405, { allow: 'GET, POST' });
+  response.end();
 }
 
 async function serveQueryHistory(request, response, queryHistoryFile) {
@@ -270,9 +337,13 @@ function isWeekend(date) {
   return weekday === 'Sat' || weekday === 'Sun';
 }
 
-function nextWeekday(date) {
+function isMarketClosed(date) {
+  return isWeekend(date) || MARKET_CLOSED_DATES.has(shanghaiParts(date).date);
+}
+
+function nextTradingDay(date) {
   let next = new Date(date.getTime() + 24 * 60 * 60 * 1000);
-  while (isWeekend(next)) next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
+  while (isMarketClosed(next)) next = new Date(next.getTime() + 24 * 60 * 60 * 1000);
   return next;
 }
 
