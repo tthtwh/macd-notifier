@@ -1,0 +1,16 @@
+name: macd-lab
+services:
+  app:
+    image: macd-lab:arm64
+    pull_policy: never
+    container_name: macd-lab
+    restart: always
+    ports:
+      - "32769:8080"
+    volumes:
+      - /tmp/zfsv3/sata11/15168867002/data/macd:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "1"
