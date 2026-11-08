@@ -2,6 +2,7 @@ node_modules/
 .env
 data/state.json
 data/query-history.json
+data/dividend-basket.json
 logs/
 npm-debug.log*
 macd-notifier-*.tar
@@ -9,3 +10,14 @@ macd-lab-*.tar
 dist/
 web/node_modules/
 web/.pnpm-store/
+/DEPLOYMENT.private.md
+
+# Python analysis scripts' artifacts
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local research output and scratch workspaces
+outputs/
+work/
